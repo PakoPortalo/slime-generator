@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Calavera slime — prototipo</title>
+<style>
+  :root { --ink:#141414; --paper:#ffffff; --muted:#6b6b6b; --line:#e6e6e6; --red:#ff3a3b; --side:580px; --gap:36px; --pad:24px; }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--paper); color:var(--ink); font:12.5px/1.35 -apple-system,Helvetica,Arial,sans-serif; overflow:hidden; }
+  main { height:100%; display:flex; justify-content:center; align-items:center; gap:var(--gap); padding:var(--pad); }
+  .stage { position:relative; flex:none; aspect-ratio:1; user-select:none; touch-action:none;
+    width:min(calc(100vh - 2 * var(--pad)), calc(100vw - 2 * var(--pad) - var(--gap) - var(--side))); }
+  .stage > *, #boilwrap > * { position:absolute; inset:0; width:100%; height:100%; }
+  .stage.drop::after { content:'Suelta la imagen'; display:flex; align-items:center; justify-content:center; outline:2px dashed var(--red); outline-offset:-2px; background:rgba(255,255,255,.85); color:var(--red); letter-spacing:.2em; text-transform:uppercase; font-size:11px; }
+  #boilwrap { filter:url(#boilfx); pointer-events:none; }
+  .stage img { pointer-events:none; }
+  .stage canvas.goo { filter:url(#goo); pointer-events:none; }
+  aside { flex:none; width:var(--side); max-height:100%; overflow:auto; display:grid; grid-template-columns:1fr 1fr; gap:0 28px; align-content:center; }
+  .col { min-width:0; }
+  section + section { margin-top:22px; }
+  h2 { font-size:11px; letter-spacing:.2em; text-transform:uppercase; color:var(--muted); font-weight:500; margin:0 0 10px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+  label.slider { display:grid; grid-template-columns:104px minmax(0,1fr) 30px; align-items:center; gap:8px; margin:0 0 5px; }
+  label.slider output { text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
+  input[type=range] { width:100%; margin:0; accent-color:var(--red); }
+  .row { display:flex; gap:6px; align-items:center; margin:0 0 8px; flex-wrap:wrap; }
+  .row.fill > * { flex:1; }
+  .vh { position:absolute; width:1px; height:1px; opacity:0; overflow:hidden; pointer-events:none; }
+  button, select, .btn { font:inherit; border:1px solid var(--ink); background:none; color:inherit; padding:5px 9px; cursor:pointer; border-radius:0; }
+  select { padding:4px 6px; }
+  button:disabled { opacity:.35; cursor:default; }
+  button.on { background:var(--ink); color:var(--paper); }
+  button.primary { background:var(--red); border-color:var(--red); color:#fff; }
+  .seg { display:flex; margin:0 0 8px; }
+  .seg button { flex:1; padding:5px 0; font-size:12px; white-space:nowrap; }
+  .seg button + button { border-left:none; }
+  .opts { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:6px; margin:0 0 8px; }
+  .opts label { display:grid; gap:3px; color:var(--muted); font-size:11px; }
+  .opts select { width:100%; color:var(--ink); }
+  .hint { color:var(--muted); font-size:11.5px; margin:0 0 8px; }
+  .hint:empty { display:none; }
+  .legend { display:flex; gap:10px; flex-wrap:wrap; color:var(--muted); font-size:11px; margin:0 0 8px; }
+  .legend i { display:inline-block; width:14px; height:4px; vertical-align:middle; margin-right:5px; }
+  #sel { border-top:1px solid var(--line); padding-top:10px; }
+  #sel[hidden] { display:none; }
+  @media (max-width:960px), (max-height:540px) {
+    body { overflow:auto; }
+    main { flex-direction:column; height:auto; }
+    .stage { width:min(100%, 620px); }
+    aside { width:min(100%, 620px); max-height:none; overflow:visible; }
+  }
+  @media (max-width:560px) { aside { grid-template-columns:1fr; } aside .col + .col { margin-top:22px; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <filter id="goo" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
+    <feGaussianBlur id="f-blur" in="SourceGraphic" stdDeviation="8" result="blur"/>
+    <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -9" result="goo"/>
+    <feTurbulence id="f-noise" type="fractalNoise" baseFrequency="0.6" numOctaves="2" seed="1" result="noise"/>
+    <feDisplacementMap in="goo" in2="noise" id="f-disp" scale="4" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+  <!-- Line boil, same recipe as the diablos module: low-frequency noise, 3 seeds cycled every 150 ms -->
+  <filter id="boilfx" x="-5%" y="-5%" width="110%" height="110%">
+    <feTurbulence id="b-noise" type="fractalNoise" baseFrequency="0.018" numOctaves="2" seed="1" result="noise"/>
+    <feDisplacementMap in="SourceGraphic" in2="noise" id="b-disp" scale="8" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+</svg>
+<main>
+  <div class="stage" id="stage">
+    <div id="boilwrap">
+      <canvas id="back" class="goo"></canvas>
+      <img id="img-white" src="calavera-centro-blanco.png" alt="">
+      <canvas id="mid" class="goo"></canvas>
+      <img id="img-black" src="calavera-centro-trazo.png" alt="Calavera Mololo">
+      <canvas id="front" class="goo"></canvas>
+    </div>
+    <canvas id="ui"></canvas>
+  </div>
+  <aside>
+    <div class="col">
+      <section>
+        <h2>Ectoplasma</h2>
+        <label class="slider" title="0 = gas (varias gotas pequeñas) · 1 = slime (una gota gorda y elástica)"><span>Gas → slime</span><input id="slime" type="range" min="0" max="1" step="0.01" value="0.65"><output id="o-slime"></output></label>
+        <label class="slider"><span>Rugosidad</span><input id="rough" type="range" min="0" max="14" step="0.5" value="8"><output id="o-rough"></output></label>
+        <label class="slider"><span>Grosor</span><input id="width" type="range" min="12" max="70" step="1" value="40"><output id="o-width"></output></label>
+        <label class="slider"><span>Altura máx.</span><input id="height" type="range" min="0.2" max="1" step="0.05" value="0.85"><output id="o-height"></output></label>
+        <label class="slider"><span>Ondulación</span><input id="wiggle" type="range" min="0" max="40" step="1" value="12"><output id="o-wiggle"></output></label>
+      </section>
+      <section>
+        <h2>Tiempo</h2>
+        <label class="slider"><span>Velocidad</span><input id="speed" type="range" min="0.3" max="2" step="0.05" value="0.8"><output id="o-speed"></output></label>
+        <label class="slider"><span>Frecuencia</span><input id="rate" type="range" min="0.2" max="2" step="0.05" value="1"><output id="o-rate"></output></label>
+        <label class="slider"><span>Fotogramas/s</span><input id="fps" type="range" min="6" max="30" step="1" value="12"><output id="o-fps"></output></label>
+        <label class="slider"><span>Temblor trazo</span><input id="boil" type="range" min="0" max="30" step="1" value="12"><output id="o-boil"></output></label>
+        <div class="row"><input id="bites" type="checkbox" checked><label for="bites">Mordiscos al deshacerse</label></div>
+        <div class="row"><button id="pause">Pausa</button></div>
+      </section>
+      <section>
+        <h2>Guardar</h2>
+        <div class="row"><button id="copy">Copiar ajustes</button><button id="reset">Restablecer</button></div>
+        <p class="hint" id="copy-msg"></p>
+      </section>
+    </div>
+
+    <div class="col">
+      <section>
+        <h2>Imagen</h2>
+        <div class="row"><label class="btn" for="file">Importar imagen</label><button id="art-reset">Usar la calavera</button></div>
+        <input id="file" type="file" accept="image/*,.png,.jpg,.jpeg,.gif,.webp,.svg" class="vh">
+        <p class="hint">Solo blanco, negro y transparente: el resto se convierte. También puedes soltarla sobre el lienzo.</p>
+        <p class="hint" id="art-msg"></p>
+      </section>
+      <section>
+        <h2>Recorridos</h2>
+        <div class="row"><button id="edit">Editar recorridos</button><button id="add">Añadir</button></div>
+        <p class="hint">Empieza en el punto grande. Arrastra nodos · ⌘ + arrastrar mueve el recorrido entero · clic en un tramo para su capa · doble clic para añadir nodo.</p>
+        <div class="legend">
+          <span><i style="background:#2b7bff"></i>Detrás</span>
+          <span><i style="background:#00a86b"></i>Entre blanco y negro</span>
+          <span><i style="background:#ff8339"></i>Encima</span>
+        </div>
+        <div id="sel" hidden>
+          <div class="row"><strong id="sel-name"></strong></div>
+          <div class="row" id="sel-seg-row">
+            <select id="sel-layer">
+              <option value="back">Detrás de la calavera</option>
+              <option value="mid">Entre el blanco y el negro</option>
+              <option value="front">Encima de todo</option>
+            </select>
+            <button id="sel-split">Partir tramo</button>
+          </div>
+          <div class="row"><button id="sel-del-node">Quitar nodo</button><button id="sel-del">Quitar recorrido</button></div>
+        </div>
+      </section>
+      <section>
+        <h2>Exportar</h2>
+        <div class="seg" id="fmt">
+          <button data-fmt="gif" class="on">GIF</button>
+          <button data-fmt="webp">WebP</button>
+          <button data-fmt="apng">APNG</button>
+          <button data-fmt="png" title="Un PNG por fotograma, en un .zip">Fotogramas</button>
+        </div>
+        <div class="opts">
+          <label>Duración<select id="x-secs"><option value="2">2 s</option><option value="3" selected>3 s</option><option value="5">5 s</option><option value="8">8 s</option></select></label>
+          <label>Tamaño<select id="x-size"><option value="400">400 px</option><option value="600" selected>600 px</option><option value="800">800 px</option><option value="1200">1200 px</option></select></label>
+          <label>Fondo<select id="x-bg"><option value="">Transparente</option><option value="#ffffff">Blanco</option></select></label>
+        </div>
+        <div class="row fill"><button id="export" class="primary">Descargar</button></div>
+        <p class="hint" id="x-msg"></p>
+      </section>
+    </div>
+  </aside>
+</main>
+
+<script src="calavera.js"></script>
+<script>
+// Logical space = the art (1200 × 1200). The default skull's head top sits at y ≈ 290; above it is the 1/3 headroom.
+const SIZE = 1200, RED = '#ff3a3b', STORE = 'mololo-slime-v3', ART_STORE = 'mololo-slime-art';
+let headTop = 290;
+
+// A path: nodes[0] is where the goo is born; layers[i] is the layer of the segment nodes[i] → nodes[i+1].
+const DEFAULT_PATHS = [
+  { nodes: [[540, 830], [530, 715], [512, 500]], layers: ['mid', 'front'] },   // out of the eye: under the ring, then over the face
+  { nodes: [[610, 470], [585, 175]], layers: ['back'] },                       // behind the head, left of centre
+  { nodes: [[760, 470], [805, 215]], layers: ['back'] },                       // behind the head, right of centre
+  { nodes: [[905, 600], [965, 310]], layers: ['back'] },                       // behind the right side, by the ear
+];
+const SLIDERS = ['slime', 'rough', 'width', 'height', 'wiggle', 'speed', 'rate', 'fps', 'boil'];
+const BOIL_SEEDS = [1, 4, 9], BOIL_MS = 150;
+const LAYER_COLOR = { back: '#2b7bff', mid: '#00a86b', front: '#ff8339' };
+const LAYER_NAME = { back: 'detrás', mid: 'entre blanco y negro', front: 'encima' };
+
+const $ = id => document.getElementById(id);
+const P = {};
+let PATHS = structuredClone(DEFAULT_PATHS);
+
+// Older saves stored straight emitters {x, y, angle, len, layer}.
+function migrate(e) {
+  if (e.nodes) return e;
+  const a = e.angle * Math.PI / 180;
+  return { nodes: [[e.x, e.y], [e.x + Math.cos(a) * e.len, e.y + Math.sin(a) * e.len]], layers: [e.layer || 'back'] };
+}
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem(STORE) || localStorage.getItem('mololo-slime-v2') || 'null');
+    if (!s) return;
+    SLIDERS.forEach(k => { if (s.params && k in s.params) $(k).value = s.params[k]; });
+    if (s.params && 'bites' in s.params) $('bites').checked = s.params.bites;
+    const list = s.paths || s.emitters;
+    if (Array.isArray(list)) PATHS = list.map(migrate);
+  } catch {}
+}
+const snapshot = () => ({ params: { ...P }, paths: PATHS.map(p => ({ nodes: p.nodes.map(([x, y]) => [Math.round(x), Math.round(y)]), layers: [...p.layers] })) });
+function save() { try { localStorage.setItem(STORE, JSON.stringify(snapshot())); } catch {} }
+
+load();
+SLIDERS.forEach(k => {
+  const el = $(k), out = $('o-' + k);
+  el.addEventListener('input', () => { P[k] = +el.value; out.textContent = el.value; updateFilter(); save(); });
+  P[k] = +el.value; out.textContent = el.value;
+});
+P.bites = $('bites').checked; $('bites').onchange = e => { P.bites = e.target.checked; save(); };
+
+const layers = {};
+for (const id of ['back', 'mid', 'front', 'ui']) { const c = $(id); c.width = SIZE; c.height = SIZE; layers[id] = c.getContext('2d'); }
+
+// The goo filter works in screen pixels, so scale it with the stage's on-screen size.
+function updateFilter() {
+  const s = $('stage').clientWidth / SIZE;
+  $('f-blur').setAttribute('stdDeviation', (6 + P.slime * 14) * s);   // more slime → blobs merge more
+  $('f-disp').setAttribute('scale', P.rough * s);
+  $('f-noise').setAttribute('baseFrequency', Math.min(1.8, 0.55 / Math.max(s, 0.2)));
+  // diablos used 0.018 on 768 px art; same wobble size relative to this 1200 px skull
+  $('b-noise').setAttribute('baseFrequency', 0.018 * 768 / SIZE / Math.max(s, 0.2));
+  $('b-disp').setAttribute('scale', P.boil * s);
+}
+new ResizeObserver(updateFilter).observe($('stage'));
+
+function rand(seed) { const x = Math.sin(seed * 12.9898) * 43758.5453; return x - Math.floor(x); }
+const ease = t => 1 - Math.pow(1 - t, 3);
+const clamp01 = t => Math.max(0, Math.min(1, t));
+
+// ---------- Art (white fill + black line, both 1200 × 1200 on transparent) ----------
+let ART = window.DEFAULT_ART;
+const loadImg = src => new Promise((ok, fail) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => fail(new Error('No se pudo leer la imagen.')); i.src = src; });
+const canvasOf = (w, h = w) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+// Bounding box of the opaque pixels (alpha ≥ 128), or null when empty.
+function opaqueBox({ data, width, height }) {
+  let x0 = width, y0 = height, x1 = -1, y1 = -1;
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    if (data[(y * width + x) * 4 + 3] < 128) continue;
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+async function artBox(art) {
+  const c = canvasOf(SIZE), g = c.getContext('2d');
+  for (const src of [art.white, art.black]) g.drawImage(await loadImg(src), 0, 0, SIZE, SIZE);
+  return opaqueBox(g.getImageData(0, 0, SIZE, SIZE));
+}
+// Imported art is fitted into the box the skull occupies, so the headroom and the default paths still make sense.
+const FIT = artBox(window.DEFAULT_ART);
+
+async function setArt(art) {
+  ART = art;
+  $('img-white').src = art.white; $('img-black').src = art.black;
+  const box = await artBox(art);
+  headTop = box ? box.y : 290;
+  drawUI();
+}
+
+async function importArt(file) {
+  if (!file) return;
+  $('art-msg').textContent = `Cargando ${file.name}…`;
+  try {
+    // A data URL (not a blob: URL) so it also works inside editor previews and from file://.
+    const dataURL = await new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => fail(new Error('No se pudo leer el archivo.')); r.readAsDataURL(file); });
+    const img = await loadImg(dataURL).catch(() => { throw new Error(`El navegador no sabe abrir «${file.name}». Prueba con PNG, JPG, WebP o SVG.`); });
+    const w = img.naturalWidth || SIZE, h = img.naturalHeight || SIZE;
+    const src = canvasOf(w, h), sg = src.getContext('2d');
+    sg.drawImage(img, 0, 0, w, h);
+    const box = opaqueBox(sg.getImageData(0, 0, w, h));
+    if (!box) { $('art-msg').textContent = 'La imagen está vacía (todo transparente).'; return; }
+
+    const fit = await FIT, k = Math.min(fit.w / box.w, fit.h / box.h);
+    const dw = box.w * k, dh = box.h * k;
+    const out = canvasOf(SIZE), og = out.getContext('2d');
+    og.imageSmoothingQuality = 'high';
+    og.drawImage(src, box.x, box.y, box.w, box.h, (SIZE - dw) / 2, (SIZE - dh) / 2, dw, dh);   // same size as the skull, centred on the canvas
+
+    // Split into a white layer and a black layer; anything else is snapped to the nearest of the two.
+    const px = og.getImageData(0, 0, SIZE, SIZE).data;
+    const white = new ImageData(SIZE, SIZE), black = new ImageData(SIZE, SIZE);
+    let opaque = 0, off = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i + 3] < 128) continue;
+      const r = px[i], g = px[i + 1], b = px[i + 2], lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      opaque++;
+      if (Math.max(r, g, b) - Math.min(r, g, b) > 48 || (lum > 64 && lum < 191)) off++;
+      const v = lum >= 128 ? 255 : 0, t = v ? white : black;
+      t.data[i] = t.data[i + 1] = t.data[i + 2] = v; t.data[i + 3] = 255;
+    }
+    const toURL = d => { const c = canvasOf(SIZE); c.getContext('2d').putImageData(d, 0, 0); return c.toDataURL('image/png'); };
+    const art = { white: toURL(white), black: toURL(black) };
+    await setArt(art);
+    try { localStorage.setItem(ART_STORE, JSON.stringify(art)); } catch {}
+    const pct = off / opaque * 100;
+    $('art-msg').textContent = pct >= 0.5
+      ? `Convertida a blanco y negro: el ${pct.toFixed(pct < 10 ? 1 : 0)} % de los píxeles tenían color o gris.`
+      : 'Imagen cargada.';
+  } catch (e) { console.error(e); $('art-msg').textContent = 'No se pudo importar: ' + e.message; }
+}
+
+$('file').onchange = e => { importArt(e.target.files[0]); e.target.value = ''; };
+$('art-reset').onclick = () => { try { localStorage.removeItem(ART_STORE); } catch {} setArt(window.DEFAULT_ART); $('art-msg').textContent = ''; };
+$('stage').addEventListener('dragover', e => { e.preventDefault(); $('stage').classList.add('drop'); });
+$('stage').addEventListener('dragleave', () => $('stage').classList.remove('drop'));
+$('stage').addEventListener('drop', e => { e.preventDefault(); $('stage').classList.remove('drop'); importArt(e.dataTransfer.files[0]); });
+
+try { const a = JSON.parse(localStorage.getItem(ART_STORE) || 'null'); setArt(a && a.white && a.black ? a : ART); } catch { setArt(ART); }
+
+// ---------- Path geometry ----------
+function measure(p) {
+  const cum = [0];
+  for (let i = 1; i < p.nodes.length; i++) cum.push(cum[i - 1] + Math.hypot(p.nodes[i][0] - p.nodes[i - 1][0], p.nodes[i][1] - p.nodes[i - 1][1]));
+  return cum;
+}
+// Point + unit tangent at distance d along the path; past the last node it keeps going in the last direction.
+function along(p, cum, d) {
+  const n = p.nodes.length;
+  let i = 0;
+  while (i < n - 2 && d > cum[i + 1]) i++;
+  const [x0, y0] = p.nodes[i], [x1, y1] = p.nodes[i + 1];
+  const segLen = Math.max(1e-6, cum[i + 1] - cum[i]);
+  const ux = (x1 - x0) / segLen, uy = (y1 - y0) / segLen;
+  const k = d - cum[i];
+  return { x: x0 + ux * k, y: y0 + uy * k, ux, uy, seg: Math.min(i, n - 2), into: k, segLen };
+}
+// Distance along the path where it first crosses the ceiling (y), extrapolating upward if needed.
+function reachToCeiling(p, cum, ceiling) {
+  for (let d = 0; d < cum[cum.length - 1] + 2000; d += 10) if (along(p, cum, d).y <= ceiling) return d;
+  return cum[cum.length - 1] + 2000;
+}
+
+// ---------- Strands ----------
+let nextId = 1;
+const strands = [];
+let timers = PATHS.map((_, i) => 0.3 + i * 0.35);
+
+function spawn(p, now) {
+  const id = nextId++, path = structuredClone(p);
+  strands.push({
+    id, p: path, cum: measure(path), born: now,
+    life: 1.3 + rand(id) * 0.6,
+    scale: 0.75 + rand(id + 1) * 0.4,
+    phase: rand(id + 3) * Math.PI * 2,
+    freq: 0.55 + rand(id + 4) * 0.45,
+  });
+}
+
+// One disc of goo at path distance d. Each segment's layer decides which canvases it lands on:
+// 'front' also paints 'mid' so the body stays continuous under the ink; near a node it overlaps both sides.
+function blob(s, d, r, frame) {
+  if (r <= 0.5) return;
+  const a = along(s.p, s.cum, d);
+  const jitter = (rand(s.id * 31 + frame) - 0.5) * 0.35;
+  const w = P.wiggle * Math.min(1, d / 60) * Math.sin(d / 100 * s.freq * Math.PI + s.phase + jitter);
+  const x = a.x - a.uy * w, y = a.y + a.ux * w;
+  const targets = new Set();
+  const add = l => { targets.add(l); if (l === 'front') targets.add('mid'); };
+  add(s.p.layers[a.seg]);
+  const overlap = r * 0.6;
+  if (a.into < overlap && a.seg > 0) add(s.p.layers[a.seg - 1]);
+  if (a.segLen - a.into < overlap && a.seg < s.p.layers.length - 1) add(s.p.layers[a.seg + 1]);
+  for (const l of targets) { const c = layers[l]; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); }
+  return [x, y];
+}
+
+function run(s, d0, d1, radiusAt, frame, dropout) {
+  for (let d = d0, i = 0; d <= d1; d += 5, i++) {
+    if (dropout > 0 && rand(s.id * 101 + i * 7) < dropout) continue;      // bits that have dissolved
+    blob(s, d, radiusAt(d), frame);
+  }
+}
+
+function drawStrand(s, now, frame) {
+  const t = (now - s.born) / s.life;
+  if (t >= 1) return false;
+  const slime = P.slime;
+  const room = Math.max(60, reachToCeiling(s.p, s.cum, headTop * (1 - P.height)));
+  const L = Math.min(s.cum[s.cum.length - 1] * s.scale, room * 0.72);
+  const R = P.width * 0.5 * (0.94 + (rand(s.id * 7 + frame) - 0.5) * 0.1);
+
+  // Timeline (0 → 1): grow · neck forms · drop lets go and rounds up · everything dissolves
+  const grow = ease(clamp01(t / 0.38));
+  const neckStart = 0.32 + (1 - slime) * 0.06;
+  const neckDur = 0.14 + slime * 0.18;                         // more slime = longer, stretchier neck
+  const neck = clamp01((t - neckStart) / neckDur);
+  const freed = clamp01((t - neckStart - neckDur) / 0.3);
+  const fade = clamp01((t - 0.74) / 0.26);
+  const lift = Math.min(ease(clamp01((t - 0.3) / 0.7)) * L * 0.18, room - L);
+  const tip = L * grow;
+  const split = L * (0.58 + slime * 0.08);
+  const tail = Math.min(split - R * 2, L * 0.75 * ease(clamp01((t - 0.42) / 0.5)));
+  const shrink = 1 - fade;
+
+  if (neck < 1) {
+    const neckW = R * (1.2 + slime * 1.6);
+    const stretch = neck * R * (0.6 + slime * 1.4);
+    const end = tip + stretch;
+    run(s, Math.max(0, tail) + lift, end + lift, D => {
+      const d = D - lift, dn = d - split - stretch * 0.5;
+      const pinch = tip > split ? neck * 0.92 * Math.exp(-(dn * dn) / (neckW * neckW)) : 0;
+      const round = d > end - R ? Math.sqrt(Math.max(0, 1 - ((d - (end - R)) / R) ** 2)) : 1;
+      return R * (1 - pinch) * round * shrink;
+    }, frame, 0);
+  } else {
+    const bodyTop = split - R * (0.5 + freed * 1.5);
+    run(s, Math.max(0, tail) + lift, bodyTop + lift, D => {
+      const toEnd = clamp01((bodyTop + lift - D) / R);
+      return R * Math.sqrt(toEnd) * (1 - freed * 0.25) * shrink;
+    }, frame, P.bites ? fade * 0.55 : 0);
+
+    const topLen = Math.max(0, tip + R * (0.6 + slime * 1.4) - split);
+    const drops = 1 + Math.round((1 - slime) * 2);              // gas → several small drops, slime → one fat drop
+    const up = freed * Math.max(0, Math.min(L * 0.3, room - tip - lift));
+    for (let k = 0; k < drops; k++) {
+      if (P.bites && fade > 0 && rand(s.id * 211 + k) < fade * 0.8) continue;
+      const share = topLen / drops;
+      const centre = split + share * (k + 0.5) + up * (1 + k * 0.35) + lift;
+      const half = share * 0.5 * (1 - freed * 0.9);
+      const rr = R * (1 + freed * 0.35 * slime) * (drops > 1 ? 0.8 : 1) * shrink;
+      run(s, centre - half, centre + half, () => rr, frame, 0);
+    }
+  }
+
+  // Eraser bites while it dissolves (like the hand-drawn reference).
+  if (P.bites && fade > 0.15) {
+    const n = Math.round(3 + fade * 12);
+    for (const k of ['back', 'mid', 'front']) { layers[k].save(); layers[k].globalCompositeOperation = 'destination-out'; }
+    for (let i = 0; i < n; i++) {
+      const a = along(s.p, s.cum, tail + lift + rand(s.id * 97 + i) * (tip - tail + R));
+      const r = R * (0.25 + fade * 0.7) * (0.5 + rand(s.id * 53 + i));
+      const x = a.x + (rand(s.id * 13 + i) - 0.5) * R, y = a.y + (rand(s.id * 17 + i) - 0.5) * R;
+      for (const k of ['back', 'mid', 'front']) { const c = layers[k]; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); }
+    }
+    for (const k of ['back', 'mid', 'front']) layers[k].restore();
+  }
+  return true;
+}
+
+// ---------- Editor ----------
+let editing = false, sel = null, drag = null;   // sel = { p, node } or { p, seg }
+const ui = layers.ui;
+
+function drawUI() {
+  ui.clearRect(0, 0, SIZE, SIZE);
+  if (!editing) return;
+  const y = headTop * (1 - P.height);
+  ui.strokeStyle = '#999'; ui.lineWidth = 2; ui.setLineDash([12, 10]);
+  ui.beginPath(); ui.moveTo(0, y); ui.lineTo(SIZE, y); ui.stroke(); ui.setLineDash([]);
+  ui.fillStyle = '#999'; ui.font = '22px -apple-system, Helvetica, sans-serif'; ui.fillText('techo', 12, y - 10);
+  PATHS.forEach((p, pi) => {
+    for (let i = 0; i < p.layers.length; i++) {
+      const [x0, y0] = p.nodes[i], [x1, y1] = p.nodes[i + 1];
+      const on = sel && sel.p === pi && sel.seg === i;
+      ui.strokeStyle = LAYER_COLOR[p.layers[i]]; ui.lineWidth = on ? 10 : 5;
+      ui.beginPath(); ui.moveTo(x0, y0); ui.lineTo(x1, y1); ui.stroke();
+    }
+    p.nodes.forEach(([x, yy], ni) => {
+      const on = sel && sel.p === pi && sel.node === ni;
+      const c = LAYER_COLOR[p.layers[Math.min(ni, p.layers.length - 1)]];
+      ui.fillStyle = '#fff'; ui.strokeStyle = '#141414'; ui.lineWidth = on ? 5 : 3;
+      ui.beginPath(); ui.arc(x, yy, ni === 0 ? 18 : 11, 0, Math.PI * 2); ui.fill(); ui.stroke();
+      if (ni === 0) { ui.fillStyle = c; ui.beginPath(); ui.arc(x, yy, 9, 0, Math.PI * 2); ui.fill(); }
+    });
+  });
+}
+
+function toLogical(ev) {
+  const r = $('ui').getBoundingClientRect();
+  return [(ev.clientX - r.left) / r.width * SIZE, (ev.clientY - r.top) / r.height * SIZE];
+}
+function segDist(x, y, [x0, y0], [x1, y1]) {
+  const dx = x1 - x0, dy = y1 - y0, L2 = dx * dx + dy * dy || 1;
+  const t = clamp01(((x - x0) * dx + (y - y0) * dy) / L2);
+  return [Math.hypot(x - (x0 + dx * t), y - (y0 + dy * t)), t];
+}
+function hit(x, y) {
+  for (let pi = PATHS.length - 1; pi >= 0; pi--) {
+    const p = PATHS[pi];
+    for (let ni = p.nodes.length - 1; ni >= 0; ni--) if (Math.hypot(p.nodes[ni][0] - x, p.nodes[ni][1] - y) < 26) return { p: pi, node: ni };
+  }
+  for (let pi = PATHS.length - 1; pi >= 0; pi--) {
+    const p = PATHS[pi];
+    for (let i = 0; i < p.layers.length; i++) { const [d, t] = segDist(x, y, p.nodes[i], p.nodes[i + 1]); if (d < 18) return { p: pi, seg: i, t }; }
+  }
+  return null;
+}
+function select(s) {
+  sel = s; $('sel').hidden = !s;
+  if (s) {
+    const p = PATHS[s.p];
+    const seg = s.seg ?? Math.min(s.node, p.layers.length - 1);
+    sel.seg = seg;
+    $('sel-name').textContent = s.node !== undefined
+      ? `Recorrido ${s.p + 1} · nodo ${s.node + 1}${s.node === 0 ? ' (nacimiento)' : ''}`
+      : `Recorrido ${s.p + 1} · tramo ${seg + 1} · ${LAYER_NAME[p.layers[seg]]}`;
+    $('sel-layer').value = p.layers[seg];
+    $('sel-del-node').disabled = s.node === undefined || s.node === 0 || p.nodes.length <= 2;
+  }
+  drawUI();
+}
+function splitSeg(pi, i, t = 0.5) {
+  const p = PATHS[pi], [x0, y0] = p.nodes[i], [x1, y1] = p.nodes[i + 1];
+  p.nodes.splice(i + 1, 0, [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t]);
+  p.layers.splice(i + 1, 0, p.layers[i]);
+  select({ p: pi, node: i + 1 }); save();
+}
+
+$('ui').addEventListener('pointerdown', ev => {
+  if (!editing) return;
+  const [x, y] = toLogical(ev), h = hit(x, y);
+  select(h ? { p: h.p, node: h.node, seg: h.seg } : null);
+  // ⌘/Ctrl-drag anywhere on a path moves the whole path; a plain drag moves one node.
+  if (h && (ev.metaKey || ev.ctrlKey)) { drag = { p: h.p, from: [x, y], nodes: structuredClone(PATHS[h.p].nodes) }; $('ui').setPointerCapture(ev.pointerId); }
+  else if (h && h.node !== undefined) { drag = h; $('ui').setPointerCapture(ev.pointerId); }
+});
+$('ui').addEventListener('dblclick', ev => {
+  if (!editing) return;
+  const [x, y] = toLogical(ev), h = hit(x, y);
+  if (h && h.seg !== undefined) splitSeg(h.p, h.seg, h.t);
+});
+$('ui').addEventListener('pointermove', ev => {
+  if (!editing) return;
+  const [x, y] = toLogical(ev);
+  const h = drag ? null : hit(x, y);
+  $('ui').style.cursor = drag ? 'grabbing' : h ? (ev.metaKey || ev.ctrlKey ? 'move' : h.node !== undefined ? 'grab' : 'pointer') : 'default';
+  if (!drag) return;
+  if (drag.nodes) { const dx = x - drag.from[0], dy = y - drag.from[1]; PATHS[drag.p].nodes = drag.nodes.map(([nx, ny]) => [nx + dx, ny + dy]); }
+  else PATHS[drag.p].nodes[drag.node] = [x, y];
+  drawUI();
+});
+$('ui').addEventListener('pointerup', () => { if (drag) { drag = null; save(); } });
+
+$('edit').onclick = () => { editing = !editing; $('edit').classList.toggle('on', editing); $('edit').textContent = editing ? 'Terminar edición' : 'Editar recorridos'; if (!editing) select(null); drawUI(); };
+$('add').onclick = () => {
+  PATHS.push({ nodes: [[600, 520], [600, 260]], layers: ['back'] }); timers.push(0);
+  if (!editing) $('edit').click();
+  select({ p: PATHS.length - 1, seg: 0 }); save();
+};
+$('sel-layer').onchange = ev => { if (!sel) return; PATHS[sel.p].layers[sel.seg] = ev.target.value; select({ p: sel.p, seg: sel.seg }); save(); };
+$('sel-split').onclick = () => { if (sel) splitSeg(sel.p, sel.seg); };
+$('sel-del-node').onclick = () => {
+  if (!sel || sel.node === undefined || sel.node === 0) return;
+  const p = PATHS[sel.p]; if (p.nodes.length <= 2) return;
+  p.nodes.splice(sel.node, 1); p.layers.splice(Math.min(sel.node, p.layers.length - 1), 1);
+  select(null); save();
+};
+$('sel-del').onclick = () => { if (!sel) return; PATHS.splice(sel.p, 1); timers.splice(sel.p, 1); select(null); save(); };
+$('copy').onclick = async () => {
+  const text = JSON.stringify(snapshot());
+  try { await navigator.clipboard.writeText(text); $('copy-msg').textContent = 'Copiado. Pégamelo en el chat.'; }
+  catch { $('copy-msg').textContent = 'No se pudo copiar automáticamente.'; console.log(text); }
+};
+$('reset').onclick = () => { try { localStorage.removeItem(STORE); localStorage.removeItem('mololo-slime-v2'); } catch {} location.reload(); };
+
+// ---------- Simulation ----------
+// Draws the goo canvases for one "drawn" frame (animated on twos, like the hand-drawn reference).
+function stepFrame(frame) {
+  const now = frame / P.fps;
+  PATHS.forEach((p, i) => {
+    if (timers[i] === undefined) timers[i] = now;
+    if (now >= timers[i]) { spawn(p, now); timers[i] = now + (0.8 + rand(nextId * 3) * 1.6) / P.rate; }
+  });
+  for (const k of ['back', 'mid', 'front']) { layers[k].clearRect(0, 0, SIZE, SIZE); layers[k].fillStyle = RED; }
+  for (let i = strands.length - 1; i >= 0; i--) if (!drawStrand(strands[i], now, frame)) strands.splice(i, 1);
+  $('f-noise').setAttribute('seed', frame % 97);            // the rough edge boils too
+}
+
+// ---------- Export ----------
+// The on-screen look comes from CSS/SVG filters that canvas can't read back, so each frame is rebuilt as a
+// standalone SVG (same filters, in logical units) and rasterised through an <img>.
+function frameSVG(goo, gooSeed, boilSeed, bg, out) {
+  const img = href => `<image href="${href}" width="${SIZE}" height="${SIZE}"/>`;
+  const gooImg = href => `<image href="${href}" width="${SIZE}" height="${SIZE}" filter="url(#g)"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${out}" height="${out}" viewBox="0 0 ${SIZE} ${SIZE}">
+<defs>
+<filter id="g" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
+<feGaussianBlur in="SourceGraphic" stdDeviation="${6 + P.slime * 14}" result="blur"/>
+<feColorMatrix in="blur" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -9" result="goo"/>
+<feTurbulence type="fractalNoise" baseFrequency="0.55" numOctaves="2" seed="${gooSeed}" result="noise"/>
+<feDisplacementMap in="goo" in2="noise" scale="${P.rough}" xChannelSelector="R" yChannelSelector="G"/>
+</filter>
+<filter id="b" x="-5%" y="-5%" width="110%" height="110%">
+<feTurbulence type="fractalNoise" baseFrequency="${0.018 * 768 / SIZE}" numOctaves="2" seed="${boilSeed}" result="noise"/>
+<feDisplacementMap in="SourceGraphic" in2="noise" scale="${P.boil}" xChannelSelector="R" yChannelSelector="G"/>
+</filter>
+</defs>
+${bg ? `<rect width="${SIZE}" height="${SIZE}" fill="${bg}"/>` : ''}
+<g filter="url(#b)">${gooImg(goo.back)}${img(ART.white)}${gooImg(goo.mid)}${img(ART.black)}${gooImg(goo.front)}</g>
+</svg>`;
+}
+async function rasterize(svg, out) {
+  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  try {
+    const img = await loadImg(url);
+    await img.decode().catch(() => {});
+    const c = canvasOf(out); c.getContext('2d').drawImage(img, 0, 0, out, out);
+    return c;
+  } finally { URL.revokeObjectURL(url); }
+}
+
+// Byte helpers
+const concat = parts => { const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0)); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; } return out; };
+const ascii = s => Uint8Array.from(s, c => c.charCodeAt(0));
+const le16 = n => [n & 255, n >>> 8 & 255], le24 = n => [n & 255, n >>> 8 & 255, n >>> 16 & 255], le32 = n => [...le16(n), ...le16(n >>> 16)];
+const be32 = n => [n >>> 24 & 255, n >>> 16 & 255, n >>> 8 & 255, n & 255];
+const CRC = Array.from({ length: 256 }, (_, n) => { for (let k = 0; k < 8; k++) n = n & 1 ? 0xedb88320 ^ (n >>> 1) : n >>> 1; return n >>> 0; });
+const crc32 = (...bufs) => { let c = ~0; for (const b of bufs) for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ (c >>> 8); return ~c >>> 0; };
+const toBlob = (c, type, q) => new Promise(ok => c.toBlob(ok, type, q));
+const bytesOf = async blob => new Uint8Array(await blob.arrayBuffer());
+// Frame delays rounded cumulatively so the total length doesn't drift.
+const delays = (n, ms, unit) => Array.from({ length: n }, (_, i) => Math.round((i + 1) * ms / unit) - Math.round(i * ms / unit));
+
+// GIF: the art is flat colour, so a fixed 4-entry palette (transparent, white, black, red) is exact enough.
+const GIF_PAL = [[0, 0, 0], [255, 255, 255], [20, 20, 20], [255, 58, 59]];
+function gifIndices(c) {
+  const { data } = c.getContext('2d').getImageData(0, 0, c.width, c.height), idx = new Uint8Array(data.length / 4);
+  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+    if (data[i + 3] < 128) continue;
+    let best = 1, bd = Infinity;
+    for (let k = 1; k < 4; k++) { const [r, g, b] = GIF_PAL[k], d = (data[i] - r) ** 2 + (data[i + 1] - g) ** 2 + (data[i + 2] - b) ** 2; if (d < bd) { bd = d; best = k; } }
+    idx[j] = best;
+  }
+  return idx;
+}
+function lzw(idx, minCode) {
+  const out = [], clear = 1 << minCode, eoi = clear + 1;
+  let size = minCode + 1, next = eoi + 1, dict = new Map(), acc = 0, bits = 0;
+  const emit = c => { acc |= c << bits; bits += size; while (bits >= 8) { out.push(acc & 255); acc >>>= 8; bits -= 8; } };
+  emit(clear);
+  let prefix = idx[0];
+  for (let i = 1; i < idx.length; i++) {
+    const k = idx[i], key = prefix << 8 | k, hitCode = dict.get(key);
+    if (hitCode !== undefined) { prefix = hitCode; continue; }
+    emit(prefix);
+    if (next === 4096) { emit(clear); next = eoi + 1; size = minCode + 1; dict = new Map(); }
+    else { if (next >= 1 << size) size++; dict.set(key, next++); }
+    prefix = k;
+  }
+  emit(prefix); emit(eoi);
+  if (bits > 0) out.push(acc & 255);
+  const blocks = [minCode];
+  for (let i = 0; i < out.length; i += 255) { const n = Math.min(255, out.length - i); blocks.push(n, ...out.slice(i, i + n)); }
+  blocks.push(0);
+  return Uint8Array.from(blocks);
+}
+function encodeGIF(frames, W, ms) {
+  const cs = delays(frames.length, ms, 10);
+  const parts = [ascii('GIF89a'), Uint8Array.from([...le16(W), ...le16(W), 0x91, 0, 0, ...GIF_PAL.flat()]),
+    Uint8Array.from([0x21, 0xff, 11, ...ascii('NETSCAPE2.0'), 3, 1, 0, 0, 0])];
+  frames.forEach((idx, i) => {
+    parts.push(Uint8Array.from([0x21, 0xf9, 4, 0x09, ...le16(cs[i]), 0, 0]));          // restore-to-background, index 0 transparent
+    parts.push(Uint8Array.from([0x2c, 0, 0, 0, 0, ...le16(W), ...le16(W), 0]), lzw(idx, 2));
+  });
+  parts.push(Uint8Array.of(0x3b));
+  return new Blob([concat(parts)], { type: 'image/gif' });
+}
+
+// Animated WebP: the browser encodes each still, then its image chunks are wrapped in ANMF frames.
+function riffChunk(id, payload) { const pad = payload.length & 1 ? [0] : []; return concat([ascii(id), Uint8Array.from(le32(payload.length)), payload, Uint8Array.from(pad)]); }
+function webpImageChunks(buf) {
+  const v = new DataView(buf.buffer, buf.byteOffset), out = [];
+  for (let o = 12; o + 8 <= buf.length;) {
+    const id = String.fromCharCode(...buf.subarray(o, o + 4)), len = v.getUint32(o + 4, true), end = Math.min(buf.length, o + 8 + len + (len & 1));
+    if (id === 'ALPH' || id === 'VP8 ' || id === 'VP8L') out.push(buf.subarray(o, end));
+    o = end;
+  }
+  return concat(out);
+}
+function encodeWebP(frames, W, ms) {
+  const d = delays(frames.length, ms, 1);
+  const body = [riffChunk('VP8X', Uint8Array.from([0x12, 0, 0, 0, ...le24(W - 1), ...le24(W - 1)])),
+    riffChunk('ANIM', Uint8Array.from([0, 0, 0, 0, 0, 0]))];
+  frames.forEach((f, i) => body.push(riffChunk('ANMF', concat([Uint8Array.from([0, 0, 0, 0, 0, 0, ...le24(W - 1), ...le24(W - 1), ...le24(d[i]), 0x02]), webpImageChunks(f)]))));
+  const all = concat(body);
+  return new Blob([concat([ascii('RIFF'), Uint8Array.from(le32(all.length + 4)), ascii('WEBP'), all])], { type: 'image/webp' });
+}
+
+// APNG: the PNG's IDAT data is reused as-is; later frames carry it in fdAT chunks.
+function pngChunks(buf) {
+  const v = new DataView(buf.buffer, buf.byteOffset), out = [];
+  for (let o = 8; o + 8 <= buf.length;) { const len = v.getUint32(o), type = String.fromCharCode(...buf.subarray(o + 4, o + 8)); out.push({ type, data: buf.subarray(o + 8, o + 8 + len) }); o += 12 + len; }
+  return out;
+}
+function pngChunk(type, data) { const t = ascii(type); return concat([Uint8Array.from(be32(data.length)), t, data, Uint8Array.from(be32(crc32(t, data)))]); }
+function encodeAPNG(frames, W, ms) {
+  const d = delays(frames.length, ms, 1), parsed = frames.map(pngChunks);
+  const ihdr = parsed[0].find(c => c.type === 'IHDR').data;
+  const parts = [Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', ihdr), pngChunk('acTL', Uint8Array.from([...be32(frames.length), ...be32(0)]))];
+  let seq = 0;
+  parsed.forEach((chunks, i) => {
+    parts.push(pngChunk('fcTL', Uint8Array.from([...be32(seq++), ...be32(W), ...be32(W), ...be32(0), ...be32(0), d[i] >> 8, d[i] & 255, 1000 >> 8, 1000 & 255, 0, 0])));
+    for (const c of chunks) if (c.type === 'IDAT') parts.push(i === 0 ? pngChunk('IDAT', c.data) : pngChunk('fdAT', concat([Uint8Array.from(be32(seq++)), c.data])));
+  });
+  parts.push(pngChunk('IEND', new Uint8Array(0)));
+  return new Blob([concat(parts)], { type: 'image/apng' });
+}
+
+// Stored (uncompressed) ZIP of PNG frames.
+function encodeZIP(files) {
+  const local = [], central = [], date = (2026 - 1980) << 9 | 1 << 5 | 1;
+  let offset = 0;
+  for (const { name, data } of files) {
+    const n = ascii(name), crc = crc32(data);
+    const common = [20, 0, 0, 0, 0, 0, 0, 0, ...le16(date), ...le32(crc), ...le32(data.length), ...le32(data.length), ...le16(n.length), 0, 0];
+    const head = concat([Uint8Array.from([...le32(0x04034b50), ...common]), n]);
+    local.push(head, data);
+    central.push(concat([Uint8Array.from([...le32(0x02014b50), 20, 0, ...common, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ...le32(offset)]), n]));
+    offset += head.length + data.length;
+  }
+  const cd = concat(central);
+  return new Blob([...local, cd, Uint8Array.from([...le32(0x06054b50), 0, 0, 0, 0, ...le16(files.length), ...le16(files.length), ...le32(cd.length), ...le32(offset), 0, 0])], { type: 'application/zip' });
+}
+
+const WEBP_OK = canvasOf(1).toDataURL('image/webp').startsWith('data:image/webp');
+if (!WEBP_OK) { const b = document.querySelector('[data-fmt=webp]'); b.disabled = true; b.title = 'Este navegador no sabe crear WebP (prueba en Chrome). APNG funciona igual y en todas partes.'; }
+let fmt = 'gif';
+document.querySelectorAll('#fmt button').forEach(b => b.onclick = () => {
+  fmt = b.dataset.fmt;
+  document.querySelectorAll('#fmt button').forEach(o => o.classList.toggle('on', o === b));
+});
+
+// Per format: how a rendered frame is kept (small) and how the kept frames become one file.
+const FORMATS = {
+  gif:  { ext: 'gif',  keep: async c => gifIndices(c),                                  pack: encodeGIF },
+  webp: { ext: 'webp', keep: async c => bytesOf(await toBlob(c, 'image/webp', 1)),      pack: encodeWebP },
+  apng: { ext: 'png',  keep: async c => bytesOf(await toBlob(c, 'image/png')),          pack: encodeAPNG },
+  png:  { ext: 'zip',  keep: async c => bytesOf(await toBlob(c, 'image/png')),
+          pack: frames => encodeZIP(frames.map((data, i) => ({ name: `slime_${String(i + 1).padStart(3, '0')}.png`, data }))) },
+};
+
+let exporting = false;
+async function exportAnim() {
+  const F = FORMATS[fmt], W = +$('x-size').value, bg = $('x-bg').value, msg = $('x-msg');
+  const ms = 1000 / (P.fps * P.speed);                               // real time between drawn frames
+  const n = Math.max(2, Math.round(+$('x-secs').value * 1000 / ms));
+  exporting = true; $('export').disabled = true;
+  const f0 = lastFrame, kept = [];
+  try {
+    for (let i = 0; i < n; i++) {
+      const f = f0 + 1 + i;
+      stepFrame(f);
+      const goo = { back: $('back').toDataURL(), mid: $('mid').toDataURL(), front: $('front').toDataURL() };
+      const boilSeed = BOIL_SEEDS[Math.floor(i * ms / BOIL_MS) % BOIL_SEEDS.length];
+      kept.push(await F.keep(await rasterize(frameSVG(goo, f % 97, boilSeed, bg, W), W)));
+      msg.textContent = `Fotograma ${i + 1} de ${n}…`;
+    }
+    msg.textContent = 'Empaquetando…';
+    const blob = F.pack(kept, W, ms);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `mololo-slime-${W}px.${F.ext}`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    msg.textContent = `Listo: ${n} fotogramas · ${(blob.size / 1024 / 1024).toFixed(1)} MB`;
+  } catch (e) {
+    console.error(e); msg.textContent = 'No se pudo exportar: ' + e.message;
+  } finally {
+    lastFrame = f0 + n; clock = lastFrame / P.fps; exporting = false; $('export').disabled = false;
+  }
+}
+$('export').onclick = exportAnim;
+
+// ---------- Loop ----------
+let paused = false, clock = 0, last = performance.now(), lastFrame = -1, boilClock = 0, lastBoil = -1;
+$('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? 'Seguir' : 'Pausa'; };
+
+function tick(ms) {
+  const dt = Math.min(0.1, (ms - last) / 1000); last = ms;
+  if (!exporting) {
+    if (!paused) { clock += dt * P.speed; boilClock += dt * 1000; }
+    const boilStep = Math.floor(boilClock / BOIL_MS) % BOIL_SEEDS.length;
+    if (boilStep !== lastBoil) { lastBoil = boilStep; $('b-noise').setAttribute('seed', BOIL_SEEDS[boilStep]); }
+    const frame = Math.floor(clock * P.fps);
+    if (frame !== lastFrame) { lastFrame = frame; stepFrame(frame); drawUI(); }
+  }
+  requestAnimationFrame(tick);
+}
+updateFilter();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
