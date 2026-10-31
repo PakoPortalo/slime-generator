@@ -83,23 +83,23 @@
       <section>
         <h2>Ectoplasma</h2>
         <label class="slider" title="0 = gas (varias gotas pequeñas) · 1 = slime (una gota gorda y elástica)"><span>Gas → slime</span><input id="slime" type="range" min="0" max="1" step="0.01" value="0.65"><output id="o-slime"></output></label>
-        <label class="slider"><span>Rugosidad</span><input id="rough" type="range" min="0" max="14" step="0.5" value="8"><output id="o-rough"></output></label>
-        <label class="slider"><span>Grosor</span><input id="width" type="range" min="12" max="70" step="1" value="40"><output id="o-width"></output></label>
-        <label class="slider"><span>Altura máx.</span><input id="height" type="range" min="0.2" max="1" step="0.05" value="0.85"><output id="o-height"></output></label>
-        <label class="slider"><span>Ondulación</span><input id="wiggle" type="range" min="0" max="40" step="1" value="12"><output id="o-wiggle"></output></label>
+        <label class="slider"><span>Rugosidad</span><input id="rough" type="range" min="0" max="14" step="0.5" value="14"><output id="o-rough"></output></label>
+        <label class="slider"><span>Grosor</span><input id="width" type="range" min="12" max="70" step="1" value="70"><output id="o-width"></output></label>
+        <label class="slider"><span>Altura máx.</span><input id="height" type="range" min="0.2" max="1" step="0.05" value="0.6"><output id="o-height"></output></label>
+        <label class="slider"><span>Ondulación</span><input id="wiggle" type="range" min="0" max="40" step="1" value="27"><output id="o-wiggle"></output></label>
       </section>
       <section>
         <h2>Tiempo</h2>
-        <label class="slider"><span>Velocidad</span><input id="speed" type="range" min="0.3" max="2" step="0.05" value="0.8"><output id="o-speed"></output></label>
-        <label class="slider"><span>Frecuencia</span><input id="rate" type="range" min="0.2" max="2" step="0.05" value="1"><output id="o-rate"></output></label>
+        <label class="slider"><span>Velocidad</span><input id="speed" type="range" min="0.3" max="2" step="0.05" value="0.95"><output id="o-speed"></output></label>
+        <label class="slider"><span>Frecuencia</span><input id="rate" type="range" min="0.2" max="2" step="0.05" value="0.85"><output id="o-rate"></output></label>
         <label class="slider"><span>Fotogramas/s</span><input id="fps" type="range" min="6" max="30" step="1" value="12"><output id="o-fps"></output></label>
-        <label class="slider"><span>Temblor trazo</span><input id="boil" type="range" min="0" max="30" step="1" value="12"><output id="o-boil"></output></label>
+        <label class="slider"><span>Temblor trazo</span><input id="boil" type="range" min="0" max="30" step="1" value="20"><output id="o-boil"></output></label>
         <div class="row"><input id="bites" type="checkbox" checked><label for="bites">Mordiscos al deshacerse</label></div>
         <div class="row"><button id="pause">Pausa</button></div>
       </section>
       <section>
         <h2>Guardar</h2>
-        <div class="row"><button id="copy">Copiar ajustes</button><button id="reset">Restablecer</button></div>
+        <div class="row"><button id="copy" title="Copiar ajustes">Copiar</button><button id="paste" title="Pegar ajustes">Pegar</button><button id="reset">Restablecer</button></div>
         <p class="hint" id="copy-msg"></p>
       </section>
     </div>
@@ -108,7 +108,8 @@
       <section>
         <h2>Imagen</h2>
         <div class="row"><label class="btn" for="file">Importar imagen</label><button id="art-reset">Usar la calavera</button></div>
-        <input id="file" type="file" accept="image/*,.png,.jpg,.jpeg,.gif,.webp,.svg" class="vh">
+        <div class="row"><input id="fill" type="checkbox" checked><label for="fill">Rellenar de blanco el interior</label></div>
+          <input id="file" type="file" accept="image/*,.png,.jpg,.jpeg,.gif,.webp,.svg" class="vh">
         <p class="hint">Solo blanco, negro y transparente: el resto se convierte. También puedes soltarla sobre el lienzo.</p>
         <p class="hint" id="art-msg"></p>
       </section>
@@ -162,10 +163,10 @@ let headTop = 290;
 
 // A path: nodes[0] is where the goo is born; layers[i] is the layer of the segment nodes[i] → nodes[i+1].
 const DEFAULT_PATHS = [
-  { nodes: [[540, 830], [530, 715], [512, 500]], layers: ['mid', 'front'] },   // out of the eye: under the ring, then over the face
-  { nodes: [[610, 470], [585, 175]], layers: ['back'] },                       // behind the head, left of centre
-  { nodes: [[760, 470], [805, 215]], layers: ['back'] },                       // behind the head, right of centre
-  { nodes: [[905, 600], [965, 310]], layers: ['back'] },                       // behind the right side, by the ear
+  { nodes: [[530, 889], [572, 814], [499, 608]], layers: ['mid', 'front'] },                // out of the eye: under the ring, then over the face
+  { nodes: [[610, 470], [585, 175]], layers: ['back'] },                                    // behind the head, left of centre
+  { nodes: [[351, 937], [195, 866], [117, 622]], layers: ['back', 'back'] },                // behind the jaw, curling up the left side
+  { nodes: [[891, 760], [923, 716], [973, 585], [912, 421]], layers: ['mid', 'front', 'front'] }, // out of the ear, then over it
 ];
 const SLIDERS = ['slime', 'rough', 'width', 'height', 'wiggle', 'speed', 'rate', 'fps', 'boil'];
 const BOIL_SEEDS = [1, 4, 9], BOIL_MS = 150;
@@ -252,6 +253,22 @@ async function setArt(art) {
   drawUI();
 }
 
+// Line art drawn on transparent: everything the outside can't reach without crossing black becomes white fill.
+function fillInside(white, black) {
+  const outside = new Uint8Array(SIZE * SIZE), stack = [];
+  const push = (x, y) => { const i = y * SIZE + x; if (!outside[i] && black.data[i * 4 + 3] === 0) { outside[i] = 1; stack.push(i); } };
+  for (let k = 0; k < SIZE; k++) { push(k, 0); push(k, SIZE - 1); push(0, k); push(SIZE - 1, k); }
+  while (stack.length) {
+    const i = stack.pop(), x = i % SIZE, y = (i - x) / SIZE;
+    if (x > 0) push(x - 1, y); if (x < SIZE - 1) push(x + 1, y);
+    if (y > 0) push(x, y - 1); if (y < SIZE - 1) push(x, y + 1);
+  }
+  for (let i = 0; i < outside.length; i++) {
+    if (outside[i] || black.data[i * 4 + 3]) continue;
+    const j = i * 4; white.data[j] = white.data[j + 1] = white.data[j + 2] = white.data[j + 3] = 255;
+  }
+}
+
 async function importArt(file) {
   if (!file) return;
   $('art-msg').textContent = `Cargando ${file.name}…`;
@@ -283,6 +300,7 @@ async function importArt(file) {
       const v = lum >= 128 ? 255 : 0, t = v ? white : black;
       t.data[i] = t.data[i + 1] = t.data[i + 2] = v; t.data[i + 3] = 255;
     }
+    if ($('fill').checked) fillInside(white, black);
     const toURL = d => { const c = canvasOf(SIZE); c.getContext('2d').putImageData(d, 0, 0); return c.toDataURL('image/png'); };
     const art = { white: toURL(white), black: toURL(black) };
     await setArt(art);
@@ -547,12 +565,21 @@ $('copy').onclick = async () => {
   catch { $('copy-msg').textContent = 'No se pudo copiar automáticamente.'; console.log(text); }
 };
 $('reset').onclick = () => { try { localStorage.removeItem(STORE); localStorage.removeItem('mololo-slime-v2'); } catch {} location.reload(); };
+$('paste').onclick = () => {
+  const text = prompt('Pega aquí los ajustes copiados:');
+  if (!text) return;
+  try {
+    const s = JSON.parse(text);
+    if (!s.params && !s.paths) throw new Error();
+    localStorage.setItem(STORE, JSON.stringify(s)); location.reload();
+  } catch { $('copy-msg').textContent = 'Eso no parecen ajustes válidos.'; }
+};
 
 // ---------- Simulation ----------
 // Draws the goo canvases for one "drawn" frame (animated on twos, like the hand-drawn reference).
-function stepFrame(frame) {
+function stepFrame(frame, spawning = true) {
   const now = frame / P.fps;
-  PATHS.forEach((p, i) => {
+  if (spawning) PATHS.forEach((p, i) => {
     if (timers[i] === undefined) timers[i] = now;
     if (now >= timers[i]) { spawn(p, now); timers[i] = now + (0.8 + rand(nextId * 3) * 1.6) / P.rate; }
   });
@@ -589,7 +616,7 @@ async function rasterize(svg, out) {
   try {
     const img = await loadImg(url);
     await img.decode().catch(() => {});
-    const c = canvasOf(out); c.getContext('2d').drawImage(img, 0, 0, out, out);
+    const c = canvasOf(out); c.getContext('2d', { willReadFrequently: true }).drawImage(img, 0, 0, out, out);
     return c;
   } finally { URL.revokeObjectURL(url); }
 }
@@ -725,20 +752,38 @@ const FORMATS = {
 };
 
 let exporting = false;
+// Whether a rendered frame shows any slime red (checked after the filters, since they swallow tiny blobs).
+function hasRed(c) {
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 128 && d[i] > 200 && d[i + 1] < 120 && d[i + 2] < 120) return true;
+  return false;
+}
+
 async function exportAnim() {
   const F = FORMATS[fmt], W = +$('x-size').value, bg = $('x-bg').value, msg = $('x-msg');
   const ms = 1000 / (P.fps * P.speed);                               // real time between drawn frames
   const n = Math.max(2, Math.round(+$('x-secs').value * 1000 / ms));
   exporting = true; $('export').disabled = true;
-  const f0 = lastFrame, kept = [];
+  // Seamless loop: start from an empty canvas, stop spawning after the chosen duration and keep going
+  // until every strand has dissolved, so the last frame flows back into the empty first one.
+  const f0 = lastFrame, kept = [], start = (f0 + 1) / P.fps;
+  strands.length = 0;
+  timers = PATHS.map((_, i) => start + 1 / P.fps + i * 0.35 / P.rate);
+  let i = 0;
   try {
-    for (let i = 0; i < n; i++) {
-      const f = f0 + 1 + i;
-      stepFrame(f);
+    for (; ; i++) {
+      const f = f0 + 1 + i, spawning = i < n;
+      stepFrame(f, spawning);
+      if (i > n + 10 * P.fps) throw new Error('el slime no termina de deshacerse.');
       const goo = { back: $('back').toDataURL(), mid: $('mid').toDataURL(), front: $('front').toDataURL() };
-      const boilSeed = BOIL_SEEDS[Math.floor(i * ms / BOIL_MS) % BOIL_SEEDS.length];
-      kept.push(await F.keep(await rasterize(frameSVG(goo, f % 97, boilSeed, bg, W), W)));
-      msg.textContent = `Fotograma ${i + 1} de ${n}…`;
+      const boilSeed = BOIL_SEEDS[Math.floor(kept.length * ms / BOIL_MS) % BOIL_SEEDS.length];
+      const c = await rasterize(frameSVG(goo, f % 97, boilSeed, bg, W), W);
+      // Only one empty frame, the first: skip the empty run before the goo shows and stop once it's gone again.
+      const empty = kept.length > 0 && !hasRed(c);
+      if (empty && !spawning) break;
+      if (empty && kept.length === 1) continue;
+      kept.push(await F.keep(c));
+      msg.textContent = spawning ? `Fotograma ${i + 1} de ${n}…` : `Fotograma ${i + 1} · cerrando el bucle…`;
     }
     msg.textContent = 'Empaquetando…';
     const blob = F.pack(kept, W, ms);
@@ -747,11 +792,11 @@ async function exportAnim() {
     a.download = `mololo-slime-${W}px.${F.ext}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-    msg.textContent = `Listo: ${n} fotogramas · ${(blob.size / 1024 / 1024).toFixed(1)} MB`;
+    msg.textContent = `Listo: ${kept.length} fotogramas en bucle · ${(blob.size / 1024 / 1024).toFixed(1)} MB`;
   } catch (e) {
     console.error(e); msg.textContent = 'No se pudo exportar: ' + e.message;
   } finally {
-    lastFrame = f0 + n; clock = lastFrame / P.fps; exporting = false; $('export').disabled = false;
+    lastFrame = f0 + 1 + i; clock = lastFrame / P.fps; exporting = false; $('export').disabled = false;
   }
 }
 $('export').onclick = exportAnim;
